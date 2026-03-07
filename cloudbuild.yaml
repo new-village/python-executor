@@ -1,0 +1,31 @@
+steps:
+  # 1. Cloud Run Job のデプロイ
+  # --source . を指定することで、Google Cloud Build がビルドパックを使用して自動的にビルドとデプロイを行います。
+  - name: 'gcloud'
+    args:
+      - 'run'
+      - 'jobs'
+      - 'deploy'
+      - '${_JOB_NAME}'
+      - '--source'
+      - '.'
+      - '--region'
+      - '${_REGION}'
+      - '--service-account'
+      - '${_SERVICE_ACCOUNT}'
+      # デフォルトの環境変数を設定（必要に応じて上書き可能）
+      - '--set-env-vars'
+      - 'TASK_MODULE=${_DEFAULT_TASK_MODULE}'
+      # ジョブの並列実行数やタイムアウト（秒）の設定例
+      - '--max-retries'
+      - '0'
+      - '--task-timeout'
+      - '3600' # 1時間（全件保存タスク等を考慮）
+
+substitutions:
+  _JOB_NAME: 'python-executor-job'
+  _REGION: 'asia-northeast1'
+  _DEFAULT_TASK_MODULE: 'skills.jpcorpreg-downloader.scripts.save_registry'
+
+options:
+  logging: CLOUD_LOGGING_ONLY
