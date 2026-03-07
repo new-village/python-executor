@@ -1,7 +1,7 @@
 steps:
   # 1. Cloud Run Job のデプロイ
   # --source . を指定することで、Google Cloud Build がビルドパックを使用して自動的にビルドとデプロイを行います。
-  - name: 'gcloud'
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
     args:
       - 'run'
       - 'jobs'
