@@ -52,7 +52,7 @@ def main():
         logger.info(f"Record count: {record_count}")
 
     except Exception as e:
-        logger.error(f"Error in renew_corpreg_nta_all: {str(e)}")
+        logger.error(f"Error in fetch_corpreg_nta_all: {str(e)}")
         raise
 
 if __name__ == "__main__":

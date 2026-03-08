@@ -1,4 +1,4 @@
-jpcorpreg
+jpcorpreg==2.0.2
 pandas
 pyarrow
 fastparquet

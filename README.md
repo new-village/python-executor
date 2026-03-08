@@ -82,7 +82,8 @@ gcloud builds submit --config cloudbuild.yaml --service-account="projects/$PROJE
 | タスク名 (`ARGS`) | 概要 | 備考 |
 | :--- | :--- | :--- |
 | `tasks.hello` | 動作確認用のサンプルタスク。ログに挨拶を出力します。 | - |
-| `tasks.renew_corpreg_nta_all` | 国税庁から法人番号データを全件取得し、Parquet形式で保存します。 | 出力先: `/data/corpreg_nta_YYYYMM.parquet`<br>実際の運用では `/data` に Cloud Storage (GCS Fuse) 等のマウントが必要です。 |
+| `tasks.fetch_corpreg_nta_all` | 国税庁から法人番号データを全件取得し、Parquet形式で保存します。 | 出力先: `/data/corpreg_nta_YYYYMM.parquet`<br>実際の運用ではメモリ増量(8GB〜)を推奨。 |
+| `tasks.fetch_corpreg_nta_diff` | 特定の日付（デフォルトは当日）の差分データを取得し、Parquet形式で保存します。 | 引数: `YYYYMMDD` (任意)<br>出力先: `/data/corpreg_nta_YYYYMMDD.parquet` |
 
 ## ジョブの動的実行 (gcloud コマンド)
 コンテナの引数（`--args`）にモジュール名を渡すことで、任意のPythonモジュールを実行できます。
@@ -91,8 +92,13 @@ gcloud builds submit --config cloudbuild.yaml --service-account="projects/$PROJE
 # デフォルト (tasks.hello) を実行
 gcloud run jobs execute $JOB_NAME --region $REGION
 
-# NTA 法人番号更新タスクを実行 (引数でモジュールを指定)
+# NTA 法人番号全件取得タスクを実行
 gcloud run jobs execute $JOB_NAME \
   --region $REGION \
-  --args="tasks.renew_corpreg_nta_all"
+  --args="tasks.fetch_corpreg_nta_all"
+
+# NTA 法人番号差分取得タスクを実行 (引数で日付を指定)
+gcloud run jobs execute $JOB_NAME \
+  --region $REGION \
+  --args="tasks.fetch_corpreg_nta_diff","20240304"
 ```
