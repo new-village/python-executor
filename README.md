@@ -75,6 +75,15 @@ gcloud builds submit --config cloudbuild.yaml --service-account="projects/$PROJE
 └── README.md
 ```
 
+## タスク一覧
+
+現在実装されているタスクとその実行要件です。
+
+| タスク名 (`TASK_MODULE`) | 概要 | 備考 |
+| :--- | :--- | :--- |
+| `tasks.hello` | 動作確認用のサンプルタスク。ログに挨拶を出力します。 | - |
+| `tasks.renew_corpreg_nta_all` | 国税庁から法人番号データを全件取得し、Parquet形式で保存します。 | 出力先: `/data/corpreg_nta_YYYYMM.parquet`<br>実際の運用では `/data` に Cloud Storage (GCS Fuse) 等のマウントが必要です。 |
+
 ## ジョブの動的実行 (gcloud コマンド)
 環境変数 `TASK_MODULE` を上書きすることで、任意のPythonモジュールを実行できます。
 
@@ -82,8 +91,8 @@ gcloud builds submit --config cloudbuild.yaml --service-account="projects/$PROJE
 # デフォルト (tasks.hello) を実行
 gcloud run jobs execute $JOB_NAME --region $REGION
 
-# 別モジュール (例: tasks.crawler) を実行
+# NTA 法人番号更新タスクを実行
 gcloud run jobs execute $JOB_NAME \
   --region $REGION \
-  --update-env-vars TASK_MODULE=tasks.crawler
+  --update-env-vars TASK_MODULE=tasks.renew_corpreg_nta_all
 ```

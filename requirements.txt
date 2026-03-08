@@ -1,0 +1,4 @@
+jpcorpreg
+pandas
+pyarrow
+fastparquet
