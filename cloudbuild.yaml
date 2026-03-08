@@ -1,5 +1,18 @@
 steps:
-  - id: 'deploy-and-execute-job'
+  # 1. Build the container image
+  - id: 'build-image'
+    name: 'gcr.io/cloud-builders/docker'
+    args: ['build', '-t', '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/${_IMAGE_NAME}:$COMMIT_SHA', '.']
+
+  # 2. Push the container image to Artifact Registry
+  - id: 'push-image'
+    name: 'gcr.io/cloud-builders/docker'
+    args: ['push', '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/${_IMAGE_NAME}:$COMMIT_SHA']
+
+  # 3. Deploy/Update Cloud Run Job
+  #    Here, we ONLY deploy and update the underlying image. 
+  #    We do NOT execute the job (`--execute-now` is intentionally removed).
+  - id: 'deploy-job'
     name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
     entrypoint: 'gcloud'
     args:
@@ -7,15 +20,16 @@ steps:
       - 'jobs'
       - 'deploy'
       - '${_JOB_NAME}'
-      - '--source'
-      - '.'
+      - '--image'
+      - '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/${_IMAGE_NAME}:$COMMIT_SHA'
       - '--region'
       - '${_REGION}'
-      - '--execute-now'
 
 substitutions:
-  _REGION: 'asia-northeast1'
-  _JOB_NAME: 'python-executor-job'
+  _REGION: 'asia-northeast1'          # Artifact Registry & Cloud Run Job region
+  _REPOSITORY: 'cloud-run-source-deploy'  # The name of your Artifact Registry repository
+  _IMAGE_NAME: 'python-executor'      # The name of the built image
+  _JOB_NAME: 'python-executor-job'    # The name of the Cloud Run Job
 
 options:
   logging: CLOUD_LOGGING_ONLY
