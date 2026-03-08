@@ -1,17 +1,17 @@
 steps:
-  # 1. Build the container image
+  # 1. Build the container image (Multi-tag with COMMIT_SHA and latest)
   - id: 'build-image'
     name: 'gcr.io/cloud-builders/docker'
-    args: ['build', '-t', '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/${_IMAGE_NAME}:$COMMIT_SHA', '.']
+    args:
+      - 'build'
+      - '-t'
+      - '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/${_IMAGE_NAME}:$COMMIT_SHA'
+      - '-t'
+      - '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/${_IMAGE_NAME}:latest'
+      - '.'
 
-  # 2. Push the container image to Artifact Registry
-  - id: 'push-image'
-    name: 'gcr.io/cloud-builders/docker'
-    args: ['push', '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/${_IMAGE_NAME}:$COMMIT_SHA']
-
-  # 3. Deploy/Update Cloud Run Job
-  #    Here, we ONLY deploy and update the underlying image. 
-  #    We do NOT execute the job (`--execute-now` is intentionally removed).
+  # 2. Deploy/Update Cloud Run Job
+  #    Use $COMMIT_SHA for the deployment to ensure we deploy exactly what was just built.
   - id: 'deploy-job'
     name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
     entrypoint: 'gcloud'
@@ -24,6 +24,11 @@ steps:
       - '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/${_IMAGE_NAME}:$COMMIT_SHA'
       - '--region'
       - '${_REGION}'
+
+# 3. Automatically push images listed here to Artifact Registry
+images:
+  - '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/${_IMAGE_NAME}:$COMMIT_SHA'
+  - '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/${_IMAGE_NAME}:latest'
 
 substitutions:
   _REGION: 'asia-northeast1'          # Artifact Registry & Cloud Run Job region
