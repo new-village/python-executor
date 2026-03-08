@@ -5,9 +5,6 @@ ENV APP_HOME=/app
 WORKDIR $APP_HOME
 COPY . ./
 
-# Install dependencies if present
-# RUN pip install --no-cache-dir -r requirements.txt
-
 # Set default task module if not provided
 ENV TASK_MODULE="tasks.hello"
 

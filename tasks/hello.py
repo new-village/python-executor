@@ -9,10 +9,9 @@ def run():
     """A simple task that prints a greeting."""
     logger.info("--- Executing the 'hello' task ---")
     
-    # Example of getting task-specific args from environment variables if needed
-    # Cloud Run Jobs default variables
-    index = os.getenv("CLOUD_RUN_TASK_INDEX", "0")
-    logger.info(f"Task Index: {index}")
+    # Log the running module name
+    task_module = os.getenv("TASK_MODULE", "tasks.hello")
+    logger.info(f"TASK_MODULE: {task_module}")
     
     logger.info("Hello, World!")
     logger.info("----------------------------------")

@@ -1,3 +1,0 @@
-jpcorpreg
-pandas
-pyarrow

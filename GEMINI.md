@@ -1,20 +1,14 @@
 # Gemini.md: python-executor
 
 > [!IMPORTANT]
-> **AI への指示**: 思考プロセスは英語で行い、コード内のコメントは英語で実装してください。また、実装プラン（`implementation_plan.md`）、ウォークスルー（`walkthrough.md`）、`Readme.md`、および各種説明は日本語で行ってください。
+> **AI への指示**: 思考プロセスは英語で行い、コード内のコメントは英語で実装してください。また、すべての説明（実装プラン、ウォークスルー、README等）は日本語で行ってください。
 
-
-## Project Objective
-`python-executor` は、Google Cloud Run Jobs 上で様々な Python ライブラリやスクリプトを効率的かつ柔軟に実行するための汎用実行フレームワークです。
-
-## Key Features
-- **Dispatcher Pattern**: `TASK_MODULE` や `TASK_ARGS` といった環境変数を通じて、実行するスクリプトや引数を動的に切り替えます。
-- **Cloud Run Jobs Optimized**: 長時間実行や並列処理が必要なバッチジョブに最適化されています。独自のコンテナイメージは作成・管理せず、Google Cloud Run Jobs の[ソースからのデプロイ](https://docs.cloud.google.com/run/docs/quickstarts/jobs/build-create-python)機能を利用します。
-- **Modular Design**: 新しいタスクを追加する際、既存のコードへの影響を最小限に抑えられます。
-
-## Technical Stack
-- **Language**: Python 3.11+
-- **Infrastructure**: Google Cloud Run Jobs
-- **CI/CD**: Google Cloud Build
-- **Containerization**: Google Cloud Build (source-to-image)
-- **Logging**: Google Cloud Logging
+## 基本方針
+- **汎用実行基盤**: 1つのコンテナイメージに全てのタスク（スクリプト）を詰め込み、実行時に環境変数 `TASK_MODULE` で動的に処理を切り替える「全部入り」構成を維持する。
+- **Cloud Run Jobs 特化**: バッチ実行に最適化し、標準出力による Cloud Logging 連携を活用する。独自ディスパッチャは持たず、`python -m` と `ENTRYPOINT` による最小構成を保つ。
+- **再試行（べき等性）の意識**: ジョブの再試行に備え、2回実行しても安全（副作用がない、または上書き許容）な実装を優先する。
+- **コスト・リソースの最小化**: コストを抑えるため、リソース設定（CPU/メモリ）は最小限を維持し、外部ライブラリの追加も最小限に留める（標準ライブラリを優先）。
+- **セキュアな運用**: プロジェクトID、サービスアカウント、APIキー等の環境特定情報や機密情報はコードに含めない。Cloud Build の置換変数や環境変数、Secret Manager を介して外部から注入する。
+- **品質保証（ローカル確認）**: 新しいタスクを追加した際は、デプロイ前に必ず `python -m tasks.your_task` 等の形式でローカルでの動作確認を行い、正常終了を確認すること。
+- **明快な命名規則**: `tasks/` フォルダ内のファイル名は、そのタスクの役割（例: `sync_notion_to_slack.py`）が一目でわかるように命名する。
+- **単一責任の原則**: 1つのファイル（モジュール）は1つのタスク（目的）に専念させ、複雑なユーティリティや共通化が必要な場合は、`lib/` などに分割を検討する。
