@@ -1,54 +1,44 @@
 # python-executor
 
 Google Cloud Run Jobs 上で動作する、シンプルな Python ジョブの実行用フレームワークです。
-このリポジトリは、将来的な拡張を見据えた最もミニマムな構成になっています。
+Google Cloud の「ソースからのデプロイ」機能を利用し、Dockerfile なしで実行可能です。
+
+## 事前準備 (Google Cloud 設定)
+このプロジェクトを利用するために、Google Cloud 側で以下の設定が必要です。
+
+1.  **API の有効化**:
+    -   Cloud Run Admin API (`run.googleapis.com`)
+    -   Cloud Build API (`cloudbuild.googleapis.com`)
+    -   Artifact Registry API (`artifactregistry.googleapis.com`)
+2.  **IAM 権限の付与**:
+    -   Cloud Build サービスアカウント（通常は `[Project-Number]@cloudbuild.gserviceaccount.com`）に対し、以下のロールを付与。
+        -   `roles/run.admin` (Cloud Run の作成・管理)
+        -   `roles/iam.serviceAccountUser` (ランタイムサービスアカウントの権限借用)
+3.  **Cloud Build トリガーの設定**:
+    -   GitHub リポジトリを連携し、特定のブランチへの Push をトリガーとして `cloudbuild.yaml` を実行するように設定します。
 
 ## 特徴
-- **最小限の構成**: `main.py` に記述された処理を実行し、ログ出力を行うだけのシンプルな構造です。
-- **Cloud Run Jobs に最適化**: 標準出力による Cloud Logging への最適化が行われています。
-- **Cloud Build 対応**: GitHub へのプッシュ時に `cloudbuild.yaml` がトリガーされ、Artifact Registry への Docker イメージの登録および Cloud Run Job としてのデプロイ・実行が自動的に行われます。
+- **極小構成**: `main.py` に処理を記述するだけのシンプルな構造です。
+- **Dockerfile 不要**: Google Cloud Build が自動的にソースコードを判別してビルド・デプロイを行います。
+- **CI/CD 自動化**: GitHub へのプッシュにより `cloudbuild.yaml` がトリガーされ、デプロイと即時実行が自動化されています。
 
 ## ディレクトリ構成
 ```text
 .
-├── Dockerfile          # Cloud Run Job用のコンテナイメージ定義
-├── cloudbuild.yaml     # CI/CDのパイプライン定義
-├── main.py             # 実際の処理を記述するエントリーポイント
-├── requirements.txt    # 必要なPythonライブラリを記載するファイル
+├── cloudbuild.yaml     # CI/CD定義 (ソースからのデプロイ)
+├── main.py             # ジョブのメインロジック
+├── requirements.txt    # 依存ライブラリ (現在は空)
 └── README.md
 ```
 
 ## 動作確認 (ローカル)
-ローカルで動作確認する場合は、以下のコマンドを実行します。
 ```bash
 python main.py
 ```
 
-出力例:
-```
-Starting Job Task Index: 0, Attempt: 0
-Hello from Cloud Run Job! This is a simple python execution test.
-CUSTOM_MESSAGE: No custom message provided.
-Job successfully completed.
-```
+## デプロイと実行
+GitHub へ Push すると、Cloud Build トリガーを介して以下の処理が走ります。
+1. `gcloud run jobs deploy --source .`: ソースコードからイメージを自動構築し、ジョブをデプロイします。
+2. デプロイ完了後、直ちにジョブが実行されます (`--execute-now`)。
 
-カスタムメッセージを環境変数から渡す場合:
-```bash
-CUSTOM_MESSAGE="Hello from local" python main.py
-```
-
-## Cloud Run Jobs での実行 (Cloud Build)
-
-Google Cloud Build にトリガーが設定されている場合、メインブランチ等に push すると自動的にビルドが走ります。
-
-`cloudbuild.yaml` は以下の処理を行います。
-1. **Build**: `Dockerfile` を用いて Docker イメージをビルドします。
-2. **Push**: Google Artifact Registry (例: `asia-northeast1` の `my-batch` リポジトリ) へイメージをプッシュします。
-3. **Deploy & Execute**: `gcloud run jobs deploy` によりジョブを更新し、コンテナイメージを差し替えた上で直ちに実行 (`--execute-now`) させます。
-
-### 実行ログの確認
-実行されたジョブのログは、Google Cloud Console の **Cloud Logging** または **Cloud Run Jobs の実行履歴** から確認できます。
-
-## 今後の拡張について
-- 処理を追加する場合は、`main.py` に必要なコードを実装してください。
-- 外部ライブラリを追加する場合は、`requirements.txt` にパッケージ名を追加し、`Dockerfile` でのインストール処理 (`RUN pip install ...`) をコメントアウトから有効化してください。
+実行ログは Google Cloud Console の Cloud Logging から確認してください。
