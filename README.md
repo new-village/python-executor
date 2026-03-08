@@ -79,20 +79,20 @@ gcloud builds submit --config cloudbuild.yaml --service-account="projects/$PROJE
 
 現在実装されているタスクとその実行要件です。
 
-| タスク名 (`TASK_MODULE`) | 概要 | 備考 |
+| タスク名 (`ARGS`) | 概要 | 備考 |
 | :--- | :--- | :--- |
 | `tasks.hello` | 動作確認用のサンプルタスク。ログに挨拶を出力します。 | - |
 | `tasks.renew_corpreg_nta_all` | 国税庁から法人番号データを全件取得し、Parquet形式で保存します。 | 出力先: `/data/corpreg_nta_YYYYMM.parquet`<br>実際の運用では `/data` に Cloud Storage (GCS Fuse) 等のマウントが必要です。 |
 
 ## ジョブの動的実行 (gcloud コマンド)
-環境変数 `TASK_MODULE` を上書きすることで、任意のPythonモジュールを実行できます。
+コンテナの引数（`--args`）にモジュール名を渡すことで、任意のPythonモジュールを実行できます。
 
 ```bash
 # デフォルト (tasks.hello) を実行
 gcloud run jobs execute $JOB_NAME --region $REGION
 
-# NTA 法人番号更新タスクを実行
+# NTA 法人番号更新タスクを実行 (引数でモジュールを指定)
 gcloud run jobs execute $JOB_NAME \
   --region $REGION \
-  --update-env-vars TASK_MODULE=tasks.renew_corpreg_nta_all
+  --args="tasks.renew_corpreg_nta_all"
 ```

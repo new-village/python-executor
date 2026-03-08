@@ -9,9 +9,9 @@ COPY . ./
 COPY requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Set default task module if not provided
-ENV TASK_MODULE="tasks.hello"
-
 # Execute the module dynamically.
-# We use 'sh -c' to expand the $TASK_MODULE environment variable.
-ENTRYPOINT ["sh", " -c", "python -m $TASK_MODULE"]
+# By setting ENTRYPOINT to ["python", "-m"], we can specify the target module as a container argument.
+ENTRYPOINT ["python", "-m"]
+
+# Default module to execute if no arguments are provided.
+CMD ["tasks.hello"]
