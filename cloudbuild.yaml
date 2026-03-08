@@ -10,7 +10,16 @@ steps:
       - '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/${_IMAGE_NAME}:latest'
       - '.'
 
-  # 2. Deploy/Update Cloud Run Job
+  # 2. Push images explicitly to Artifact Registry
+  #    This is required because 'gcloud run jobs deploy' pulls the image during the build process.
+  - id: 'push-images'
+    name: 'gcr.io/cloud-builders/docker'
+    args:
+      - 'push'
+      - '-a' # Push all tags of the image
+      - '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/${_IMAGE_NAME}'
+
+  # 3. Deploy/Update Cloud Run Job
   #    Use $COMMIT_SHA for the deployment to ensure we deploy exactly what was just built.
   - id: 'deploy-job'
     name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
@@ -25,7 +34,7 @@ steps:
       - '--region'
       - '${_REGION}'
 
-# 3. Automatically push images listed here to Artifact Registry
+# 4. Automatically push images listed here to Artifact Registry (Backup and Metadata)
 images:
   - '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/${_IMAGE_NAME}:$COMMIT_SHA'
   - '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/${_IMAGE_NAME}:latest'
