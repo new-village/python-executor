@@ -1,6 +1,14 @@
 steps:
-  # 1. Cloud Run Job のデプロイ
-  # --source . を指定することで、Google Cloud Build がビルドパックを使用して自動的にビルドとデプロイを行います。
+  # 1. Build the container image
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['build', '-t', '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/${_IMAGE_NAME}:$COMMIT_SHA', '.']
+    
+  # 2. Push the container image to Artifact Registry
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['push', '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/${_IMAGE_NAME}:$COMMIT_SHA']
+
+  # 3. Deploy/Update Cloud Run Job
+  # Note: This updates the job configuration with the new image.
   - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
     entrypoint: 'gcloud'
     args:
@@ -8,25 +16,17 @@ steps:
       - 'jobs'
       - 'deploy'
       - '${_JOB_NAME}'
-      - '--source'
-      - '.'
+      - '--image'
+      - '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/${_IMAGE_NAME}:$COMMIT_SHA'
       - '--region'
       - '${_REGION}'
-      - '--service-account'
-      - '${_SERVICE_ACCOUNT}'
-      # デフォルトの環境変数を設定（必要に応じて上書き可能）
-      - '--set-env-vars'
-      - 'TASK_MODULE=${_DEFAULT_TASK_MODULE}'
-      # ジョブの並列実行数やタイムアウト（秒）の設定例
-      - '--max-retries'
-      - '0'
-      - '--task-timeout'
-      - '3600' # 1時間（全件保存タスク等を考慮）
+      - '--execute-now' # Deploy and immediately execute the job
 
 substitutions:
-  _JOB_NAME: 'python-executor-job'
-  _REGION: 'asia-northeast1'
-  _DEFAULT_TASK_MODULE: 'skills.jpcorpreg-downloader.scripts.save_registry'
+  _REGION: 'asia-northeast1'          # Artifact Registry & Cloud Run Job region
+  _REPOSITORY: 'cloud-run-source-deploy'             # The name of your Artifact Registry repository
+  _IMAGE_NAME: 'python-executor'      # The name of the built image
+  _JOB_NAME: 'python-executor-job'    # The name of the Cloud Run Job
 
 options:
   logging: CLOUD_LOGGING_ONLY
