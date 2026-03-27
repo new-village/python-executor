@@ -48,16 +48,20 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 def ensure_dataset(client: bigquery.Client) -> None:
-    """Create dataset if it doesn't exist."""
+    """Create dataset if it doesn't exist (no-op if already exists)."""
+    from google.api_core.exceptions import Conflict
     ds_ref = bigquery.DatasetReference(PROJECT_ID, DATASET)
+    ds = bigquery.Dataset(ds_ref)
+    ds.location = "asia-northeast1"
     try:
-        client.get_dataset(ds_ref)
-        logger.info(f"Dataset {DATASET} already exists.")
-    except Exception:
-        ds = bigquery.Dataset(ds_ref)
-        ds.location = "asia-northeast1"
         client.create_dataset(ds)
         logger.info(f"Created dataset {DATASET}.")
+    except Conflict:
+        logger.info(f"Dataset {DATASET} already exists.")
+    except Exception as e:
+        # Permission denied on create — assume dataset was pre-created externally
+        logger.warning(f"Could not create dataset (may already exist): {e}")
+        logger.info("Proceeding assuming dataset exists.")
 
 
 def gcs_file_exists(bucket_name: str, blob_name: str) -> bool:
