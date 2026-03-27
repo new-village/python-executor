@@ -150,7 +150,7 @@ def init_load(client: bigquery.Client, yyyymm: str) -> None:
 
 MERGE_SQL = """
 MERGE `{latest}` AS T
-USING `{staging}` AS S
+USING (SELECT * FROM `{staging}` WHERE latest = '1') AS S
 ON T.corporate_number = S.corporate_number
 WHEN MATCHED THEN UPDATE SET
   sequence_number              = S.sequence_number,
@@ -237,14 +237,7 @@ def diff_load(client: bigquery.Client, yyyymmdd: str) -> None:
     """, "staging metadata")
 
     # Step 2: MERGE latest=1 records → corpreg.latest
-    # Create a view/temp of latest=1 only for the MERGE source
-    staging_latest_sql = f"""
-        CREATE OR REPLACE TEMP TABLE staging_latest AS
-        SELECT * FROM `{TABLE_STAGING}` WHERE latest = '1'
-    """
-    run_query(client, staging_latest_sql, "staging_latest temp table")
-
-    merge_sql = MERGE_SQL.format(latest=TABLE_LATEST, staging="staging_latest")
+    merge_sql = MERGE_SQL.format(latest=TABLE_LATEST, staging=TABLE_STAGING)
     run_query(client, merge_sql, "MERGE into corpreg.latest")
 
     # Step 3: Append ALL records → corpreg.history
