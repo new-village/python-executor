@@ -2,3 +2,5 @@ jpcorpreg==2.0.2
 pandas
 pyarrow
 fastparquet
+google-cloud-bigquery[pandas]
+google-cloud-storage
