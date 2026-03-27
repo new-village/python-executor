@@ -120,26 +120,28 @@ def init_load(client: bigquery.Client, yyyymm: str) -> None:
         bigquery.WriteDisposition.WRITE_TRUNCATE,
     )
 
-    # Add management column _loaded_at
-    run_query(client, f"""
-        ALTER TABLE `{TABLE_LATEST}`
-        ADD COLUMN IF NOT EXISTS _loaded_at TIMESTAMP;
-        UPDATE `{TABLE_LATEST}` SET _loaded_at = CURRENT_TIMESTAMP() WHERE _loaded_at IS NULL;
-    """, "_loaded_at column (latest)")
+    # Add management column _loaded_at (one statement at a time)
+    run_query(client,
+        f"ALTER TABLE `{TABLE_LATEST}` ADD COLUMN IF NOT EXISTS _loaded_at TIMESTAMP",
+        "_loaded_at column (latest)")
+    run_query(client,
+        f"UPDATE `{TABLE_LATEST}` SET _loaded_at = CURRENT_TIMESTAMP() WHERE _loaded_at IS NULL",
+        "backfill _loaded_at (latest)")
 
     # Load into corpreg.history (append as baseline snapshot)
     load_parquet_to_table(
         client, gcs_uri, TABLE_HISTORY,
         bigquery.WriteDisposition.WRITE_APPEND,
     )
-    run_query(client, f"""
-        ALTER TABLE `{TABLE_HISTORY}`
-        ADD COLUMN IF NOT EXISTS source_file STRING;
-        ALTER TABLE `{TABLE_HISTORY}`
-        ADD COLUMN IF NOT EXISTS _loaded_at TIMESTAMP;
-        UPDATE `{TABLE_HISTORY}` SET source_file = '{blob_name}', _loaded_at = CURRENT_TIMESTAMP()
-        WHERE source_file IS NULL;
-    """, "_loaded_at / source_file column (history)")
+    run_query(client,
+        f"ALTER TABLE `{TABLE_HISTORY}` ADD COLUMN IF NOT EXISTS source_file STRING",
+        "source_file column (history)")
+    run_query(client,
+        f"ALTER TABLE `{TABLE_HISTORY}` ADD COLUMN IF NOT EXISTS _loaded_at TIMESTAMP",
+        "_loaded_at column (history)")
+    run_query(client,
+        f"UPDATE `{TABLE_HISTORY}` SET source_file = '{blob_name}', _loaded_at = CURRENT_TIMESTAMP() WHERE source_file IS NULL",
+        "backfill metadata (history)")
 
     logger.info("Initial load complete.")
 
@@ -227,14 +229,15 @@ def diff_load(client: bigquery.Client, yyyymmdd: str) -> None:
         client, gcs_uri, TABLE_STAGING,
         bigquery.WriteDisposition.WRITE_TRUNCATE,
     )
-    run_query(client, f"""
-        ALTER TABLE `{TABLE_STAGING}`
-        ADD COLUMN IF NOT EXISTS source_file STRING;
-        ALTER TABLE `{TABLE_STAGING}`
-        ADD COLUMN IF NOT EXISTS _loaded_at TIMESTAMP;
-        UPDATE `{TABLE_STAGING}` SET source_file = '{blob_name}', _loaded_at = CURRENT_TIMESTAMP()
-        WHERE source_file IS NULL;
-    """, "staging metadata")
+    run_query(client,
+        f"ALTER TABLE `{TABLE_STAGING}` ADD COLUMN IF NOT EXISTS source_file STRING",
+        "source_file column (staging)")
+    run_query(client,
+        f"ALTER TABLE `{TABLE_STAGING}` ADD COLUMN IF NOT EXISTS _loaded_at TIMESTAMP",
+        "_loaded_at column (staging)")
+    run_query(client,
+        f"UPDATE `{TABLE_STAGING}` SET source_file = '{blob_name}', _loaded_at = CURRENT_TIMESTAMP() WHERE source_file IS NULL",
+        "backfill metadata (staging)")
 
     # Step 2: MERGE latest=1 records → corpreg.latest
     merge_sql = MERGE_SQL.format(latest=TABLE_LATEST, staging=TABLE_STAGING)
