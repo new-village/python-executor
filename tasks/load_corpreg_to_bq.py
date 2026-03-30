@@ -171,7 +171,7 @@ WHEN MATCHED THEN UPDATE SET
   city_code                    = S.city_code,
   post_code                    = S.post_code,
   address_outside              = S.address_outside,
-  address_outside_image_id     = S.address_outside_image_id,
+  address_outside_image_id     = CAST(S.address_outside_image_id AS STRING),
   close_date                   = S.close_date,
   close_cause                  = S.close_cause,
   successor_corporate_number   = S.successor_corporate_number,
@@ -199,7 +199,7 @@ WHEN NOT MATCHED THEN
     S.corporate_number, S.sequence_number, S.process, S.correct, S.update_date, S.change_date,
     S.name, S.name_image_id, S.kind, S.prefecture_name, S.city_name, S.street_number,
     S.address_image_id, S.prefecture_code, S.city_code, S.post_code,
-    S.address_outside, S.address_outside_image_id, S.close_date, S.close_cause,
+    S.address_outside, CAST(S.address_outside_image_id AS STRING), S.close_date, S.close_cause,
     S.successor_corporate_number, S.change_cause, S.assignment_date, S.latest,
     S.en_name, S.en_prefecture_name, S.en_city_name, S.en_address_outside,
     S.furigana, S.hihyoji, CURRENT_TIMESTAMP()
@@ -244,7 +244,8 @@ def diff_load(client: bigquery.Client, yyyymmdd: str) -> None:
     run_query(client, merge_sql, "MERGE into corpreg.latest")
 
     # Step 3: Append ALL records → corpreg.history (explicit column list to avoid schema mismatch)
-    COLS = (
+    # Note: address_outside_image_id may arrive as INTEGER in Parquet; cast to STRING for consistency
+    COLS_INSERT = (
         "sequence_number, corporate_number, process, correct, update_date, change_date, "
         "name, name_image_id, kind, prefecture_name, city_name, street_number, "
         "address_image_id, prefecture_code, city_code, post_code, "
@@ -253,9 +254,18 @@ def diff_load(client: bigquery.Client, yyyymmdd: str) -> None:
         "en_name, en_prefecture_name, en_city_name, en_address_outside, "
         "furigana, hihyoji, source_file, _loaded_at"
     )
+    COLS_SELECT = (
+        "sequence_number, corporate_number, process, correct, update_date, change_date, "
+        "name, name_image_id, kind, prefecture_name, city_name, street_number, "
+        "address_image_id, prefecture_code, city_code, post_code, "
+        "address_outside, CAST(address_outside_image_id AS STRING) AS address_outside_image_id, close_date, close_cause, "
+        "successor_corporate_number, change_cause, assignment_date, latest, "
+        "en_name, en_prefecture_name, en_city_name, en_address_outside, "
+        "furigana, hihyoji, source_file, _loaded_at"
+    )
     run_query(client, f"""
-        INSERT INTO `{TABLE_HISTORY}` ({COLS})
-        SELECT {COLS} FROM `{TABLE_STAGING}`
+        INSERT INTO `{TABLE_HISTORY}` ({COLS_INSERT})
+        SELECT {COLS_SELECT} FROM `{TABLE_STAGING}`
     """, "INSERT into corpreg.history")
 
     # Step 4: Drop staging
