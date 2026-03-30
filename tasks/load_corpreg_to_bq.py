@@ -181,7 +181,7 @@ WHEN MATCHED THEN UPDATE SET
   en_name                      = S.en_name,
   en_prefecture_name           = S.en_prefecture_name,
   en_city_name                 = S.en_city_name,
-  en_address_outside           = S.en_address_outside,
+  en_address_outside           = CAST(S.en_address_outside AS STRING),
   furigana                     = S.furigana,
   hihyoji                      = S.hihyoji,
   _loaded_at                   = CURRENT_TIMESTAMP()
@@ -201,7 +201,7 @@ WHEN NOT MATCHED THEN
     S.address_image_id, S.prefecture_code, S.city_code, S.post_code,
     S.address_outside, CAST(S.address_outside_image_id AS STRING), S.close_date, S.close_cause,
     S.successor_corporate_number, S.change_cause, S.assignment_date, S.latest,
-    S.en_name, S.en_prefecture_name, S.en_city_name, S.en_address_outside,
+    S.en_name, S.en_prefecture_name, S.en_city_name, CAST(S.en_address_outside AS STRING),
     S.furigana, S.hihyoji, CURRENT_TIMESTAMP()
   )
 """
@@ -260,7 +260,7 @@ def diff_load(client: bigquery.Client, yyyymmdd: str) -> None:
         "address_image_id, prefecture_code, city_code, post_code, "
         "address_outside, CAST(address_outside_image_id AS STRING) AS address_outside_image_id, close_date, close_cause, "
         "successor_corporate_number, change_cause, assignment_date, latest, "
-        "en_name, en_prefecture_name, en_city_name, en_address_outside, "
+        "en_name, en_prefecture_name, en_city_name, CAST(en_address_outside AS STRING) AS en_address_outside, "
         "furigana, hihyoji, source_file, _loaded_at"
     )
     run_query(client, f"""
