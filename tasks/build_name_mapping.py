@@ -47,8 +47,8 @@ from openai import OpenAI
 PROJECT_ID    = "yata-intelligence"
 DATASET       = "corpreg"
 TABLE_LATEST  = f"{PROJECT_ID}.{DATASET}.latest"
-GCS_BUCKET    = "yata-raw"
-MASTER_PATH   = "master/name_image_mapping.csv"
+GCS_BUCKET    = "yata-master"
+MASTER_PATH   = "name_image_mapping.csv"
 NTA_IMAGE_URL = "https://www.houjin-bangou.nta.go.jp/image?imageid={image_id}"
 
 OCR_MODEL     = "gpt-4o-mini"   # vision-capable; switch to gpt-5-nano when vision supported
