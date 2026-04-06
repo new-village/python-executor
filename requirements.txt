@@ -4,3 +4,5 @@ pyarrow
 fastparquet
 google-cloud-bigquery[pandas]
 google-cloud-storage
+openai
+requests
