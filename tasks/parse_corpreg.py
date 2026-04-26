@@ -194,22 +194,19 @@ def main() -> None:
             df_chunk = batch.to_pandas()
             df_parsed = parse_chunk(df_chunk)
 
+            # Coerce object columns to string to avoid schema mismatches across chunks
+            for col in df_parsed.columns:
+                if df_parsed[col].dtype == object:
+                    df_parsed[col] = df_parsed[col].astype(str).where(df_parsed[col].notna(), other=None)
+
+            table = pa.Table.from_pandas(df_parsed, preserve_index=False)
+
             if schema is None:
-                # Fix schema on first batch: cast all new parsed_* columns to string
-                # to avoid type inference differences across chunks (e.g. None vs str)
-                table = pa.Table.from_pandas(df_parsed, preserve_index=False)
-                # Rebuild schema with parsed_* columns forced to string
-                new_fields = []
-                for field in table.schema:
-                    if field.name.startswith("parsed_"):
-                        new_fields.append(pa.field(field.name, pa.string()))
-                    else:
-                        new_fields.append(field)
-                schema = pa.schema(new_fields)
+                schema = table.schema
                 writer = pq.ParquetWriter(str(dst_tmp), schema)
 
-            # Cast to fixed schema
-            table = pa.Table.from_pandas(df_parsed, schema=schema, preserve_index=False)
+            # Cast to fixed schema (handles minor type drift between chunks)
+            table = table.cast(schema)
             writer.write_table(table)
 
             processed += len(df_chunk)
