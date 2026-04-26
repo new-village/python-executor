@@ -186,27 +186,38 @@ def main() -> None:
         total_rows = pf.metadata.num_rows
         logger.info(f"Total rows: {total_rows:,}")
 
-        writer = None
-        schema = None
+        # Build output schema = source schema + parsed_* string columns
+        src_schema = pf.schema_arrow
+        parsed_fields = [
+            pa.field("parsed_legal_form", pa.string()),
+            pa.field("parsed_brand_name", pa.string()),
+            pa.field("parsed_brand_kana", pa.string()),
+            pa.field("parsed_name_normalized", pa.string()),
+            pa.field("parsed_state", pa.string()),
+            pa.field("parsed_city", pa.string()),
+            pa.field("parsed_suburb", pa.string()),
+            pa.field("parsed_house_number", pa.string()),
+            pa.field("parsed_house_number_raw", pa.string()),
+            pa.field("parsed_addr_normalized", pa.string()),
+        ]
+        out_schema = pa.schema(list(src_schema) + parsed_fields)
+        writer = pq.ParquetWriter(str(dst_tmp), out_schema)
         processed = 0
 
         for batch in pf.iter_batches(batch_size=CHUNK_SIZE):
             df_chunk = batch.to_pandas()
             df_parsed = parse_chunk(df_chunk)
 
-            # Coerce object columns to string to avoid schema mismatches across chunks
-            for col in df_parsed.columns:
-                if df_parsed[col].dtype == object:
-                    df_parsed[col] = df_parsed[col].astype(str).where(df_parsed[col].notna(), other=None)
-
-            table = pa.Table.from_pandas(df_parsed, preserve_index=False)
-
-            if schema is None:
-                schema = table.schema
-                writer = pq.ParquetWriter(str(dst_tmp), schema)
-
-            # Cast to fixed schema (handles minor type drift between chunks)
-            table = table.cast(schema)
+            # Build arrow table using the fixed output schema
+            arrays = []
+            for field in out_schema:
+                col = df_parsed[field.name] if field.name in df_parsed.columns else df_chunk[field.name]
+                try:
+                    arrays.append(pa.array(col, type=field.type, from_pandas=True))
+                except Exception:
+                    # Fallback: cast via string for problematic columns
+                    arrays.append(pa.array(col.astype(str).where(col.notna(), other=None), type=pa.string(), from_pandas=True).cast(field.type) if field.type != pa.null() else pa.array([None]*len(col), type=pa.string()))
+            table = pa.table(dict(zip([f.name for f in out_schema], arrays)), schema=out_schema)
             writer.write_table(table)
 
             processed += len(df_chunk)
