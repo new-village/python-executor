@@ -7,8 +7,10 @@ using ja-entity-parser, and write the enriched result to GCS yata-master.
 Input:  gs://yata-raw/corpreg_nta_YYYYMM.parquet
 Output: gs://yata-master/corpreg_parsed_YYYYMM.parquet
 
+Processes in chunks to avoid OOM on large files (5M+ rows).
+
 Usage (Cloud Run Job):
-  TASK_MODULE=tasks.parse_corpreg  (+ optional DATE env var, default: current month)
+  args: ["tasks.parse_corpreg", "202603"]
 
 Usage (local):
   python -m tasks.parse_corpreg [YYYYMM]
@@ -18,10 +20,10 @@ Output columns (added on top of original):
   parsed_brand_name        - ブランド名 (法人種別除く)
   parsed_brand_kana        - ブランド名カナ
   parsed_name_normalized   - 正規化済み法人名
-  parsed_state             - 都道府県 (from address parser; field: state)
+  parsed_state             - 都道府県 (field: state)
   parsed_city              - 市区町村 (field: city)
   parsed_suburb            - 町名 (field: suburb)
-  parsed_house_number      - 番地 (正規化済み: 半角数字+ハイフン; field: house_number)
+  parsed_house_number      - 番地 (正規化済み; field: house_number)
   parsed_house_number_raw  - 番地 原文 (field: house_number_raw)
   parsed_addr_normalized   - 正規化済み住所
 """
@@ -32,9 +34,13 @@ import io
 import logging
 import os
 import sys
+import tempfile
 from datetime import datetime
+from pathlib import Path
 
 import pandas as pd
+import pyarrow as pa
+import pyarrow.parquet as pq
 from google.cloud import storage
 
 # ja-entity-parser
@@ -47,7 +53,8 @@ SRC_BUCKET = "yata-raw"
 DST_BUCKET = "yata-master"
 PROJECT_ID = "yata-intelligence"
 
-BATCH_SIZE = 10_000  # rows per log checkpoint
+CHUNK_SIZE = 50_000   # rows per processing chunk
+LOG_EVERY = 200_000   # rows between progress log lines
 
 logging.basicConfig(
     level=logging.INFO,
@@ -57,31 +64,33 @@ logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
-# Helpers
+# GCS helpers
 # ---------------------------------------------------------------------------
 
 def gcs_client() -> storage.Client:
     return storage.Client(project=PROJECT_ID)
 
 
-def load_parquet_from_gcs(sc: storage.Client, bucket_name: str, blob_name: str) -> pd.DataFrame:
-    logger.info(f"Downloading gs://{bucket_name}/{blob_name} ...")
+def download_to_tmpfile(sc: storage.Client, bucket_name: str, blob_name: str) -> Path:
+    """Stream-download GCS blob to a local temp file and return its Path."""
+    tmp = tempfile.NamedTemporaryFile(suffix=".parquet", delete=False)
+    tmp_path = Path(tmp.name)
+    tmp.close()
+    logger.info(f"Downloading gs://{bucket_name}/{blob_name} → {tmp_path} ...")
     bucket = sc.bucket(bucket_name)
     blob = bucket.blob(blob_name)
-    data = blob.download_as_bytes()
-    df = pd.read_parquet(io.BytesIO(data), engine="pyarrow")
-    logger.info(f"  Loaded {len(df):,} rows, {len(df.columns)} columns.")
-    return df
+    blob.download_to_filename(str(tmp_path))
+    size_mb = tmp_path.stat().st_size / 1024 / 1024
+    logger.info(f"  Downloaded {size_mb:.1f} MB")
+    return tmp_path
 
 
-def upload_parquet_to_gcs(sc: storage.Client, df: pd.DataFrame, bucket_name: str, blob_name: str) -> None:
-    logger.info(f"Uploading {len(df):,} rows → gs://{bucket_name}/{blob_name} ...")
-    buf = io.BytesIO()
-    df.to_parquet(buf, engine="pyarrow", index=False)
-    buf.seek(0)
+def upload_from_tmpfile(sc: storage.Client, local_path: Path, bucket_name: str, blob_name: str) -> None:
+    size_mb = local_path.stat().st_size / 1024 / 1024
+    logger.info(f"Uploading {local_path} ({size_mb:.1f} MB) → gs://{bucket_name}/{blob_name} ...")
     bucket = sc.bucket(bucket_name)
     blob = bucket.blob(blob_name)
-    blob.upload_from_file(buf, content_type="application/octet-stream")
+    blob.upload_from_filename(str(local_path), content_type="application/octet-stream")
     logger.info("  Upload complete.")
 
 
@@ -110,38 +119,25 @@ def safe_parse_address(pref: str, city: str, street: str) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# Batch parse
+# Chunk parse
 # ---------------------------------------------------------------------------
 
-def parse_dataframe(df: pd.DataFrame) -> pd.DataFrame:
-    total = len(df)
-    logger.info(f"Parsing {total:,} rows ...")
+def parse_chunk(df: pd.DataFrame) -> pd.DataFrame:
+    name_cols: dict[str, list] = {k: [] for k in [
+        "parsed_legal_form", "parsed_brand_name", "parsed_brand_kana", "parsed_name_normalized"
+    ]}
+    addr_cols: dict[str, list] = {k: [] for k in [
+        "parsed_state", "parsed_city", "parsed_suburb",
+        "parsed_house_number", "parsed_house_number_raw", "parsed_addr_normalized"
+    ]}
 
-    # Pre-allocate result columns
-    name_cols = {
-        "parsed_legal_form": [],
-        "parsed_brand_name": [],
-        "parsed_brand_kana": [],
-        "parsed_name_normalized": [],
-    }
-    addr_cols = {
-        "parsed_state": [],
-        "parsed_city": [],
-        "parsed_suburb": [],
-        "parsed_house_number": [],
-        "parsed_house_number_raw": [],
-        "parsed_addr_normalized": [],
-    }
-
-    for i, row in enumerate(df.itertuples(index=False), start=1):
-        # Corporate name
+    for row in df.itertuples(index=False):
         cr = safe_parse_corporate(getattr(row, "name", None))
         name_cols["parsed_legal_form"].append(cr.get("legal_form"))
         name_cols["parsed_brand_name"].append(cr.get("brand_name"))
         name_cols["parsed_brand_kana"].append(cr.get("brand_kana"))
         name_cols["parsed_name_normalized"].append(cr.get("normalized"))
 
-        # Address — join prefecture_name + city_name + street_number
         ar = safe_parse_address(
             getattr(row, "prefecture_name", None),
             getattr(row, "city_name", None),
@@ -154,14 +150,9 @@ def parse_dataframe(df: pd.DataFrame) -> pd.DataFrame:
         addr_cols["parsed_house_number_raw"].append(ar.get("house_number_raw"))
         addr_cols["parsed_addr_normalized"].append(ar.get("normalized"))
 
-        if i % BATCH_SIZE == 0 or i == total:
-            logger.info(f"  Progress: {i:,}/{total:,} ({i/total*100:.1f}%)")
-
     result = df.copy()
     for col, values in {**name_cols, **addr_cols}.items():
         result[col] = values
-
-    logger.info("Parsing complete.")
     return result
 
 
@@ -170,7 +161,6 @@ def parse_dataframe(df: pd.DataFrame) -> pd.DataFrame:
 # ---------------------------------------------------------------------------
 
 def main() -> None:
-    # Determine YYYYMM — from CLI arg, DATE env var, or current month
     if len(sys.argv) > 1:
         yyyymm = sys.argv[1]
     else:
@@ -185,11 +175,45 @@ def main() -> None:
 
     sc = gcs_client()
 
-    df = load_parquet_from_gcs(sc, SRC_BUCKET, src_blob)
-    parsed = parse_dataframe(df)
-    upload_parquet_to_gcs(sc, parsed, DST_BUCKET, dst_blob)
+    # Download source to local temp file
+    src_tmp = download_to_tmpfile(sc, SRC_BUCKET, src_blob)
 
-    logger.info(f"Done. Output: gs://{DST_BUCKET}/{dst_blob} ({len(parsed):,} rows)")
+    # Prepare output temp file (ParquetWriter for streaming write)
+    dst_tmp = Path(tempfile.mktemp(suffix=".parquet"))
+
+    try:
+        pf = pq.ParquetFile(str(src_tmp))
+        total_rows = pf.metadata.num_rows
+        logger.info(f"Total rows: {total_rows:,}")
+
+        writer = None
+        processed = 0
+
+        for batch in pf.iter_batches(batch_size=CHUNK_SIZE):
+            df_chunk = batch.to_pandas()
+            df_parsed = parse_chunk(df_chunk)
+            table = pa.Table.from_pandas(df_parsed, preserve_index=False)
+
+            if writer is None:
+                writer = pq.ParquetWriter(str(dst_tmp), table.schema)
+            writer.write_table(table)
+
+            processed += len(df_chunk)
+            if processed % LOG_EVERY < CHUNK_SIZE or processed >= total_rows:
+                logger.info(f"  Progress: {processed:,}/{total_rows:,} ({processed/total_rows*100:.1f}%)")
+
+        if writer:
+            writer.close()
+
+        logger.info(f"Parsing complete. {processed:,} rows written.")
+
+        # Upload result
+        upload_from_tmpfile(sc, dst_tmp, DST_BUCKET, dst_blob)
+        logger.info(f"Done. Output: gs://{DST_BUCKET}/{dst_blob} ({processed:,} rows)")
+
+    finally:
+        src_tmp.unlink(missing_ok=True)
+        dst_tmp.unlink(missing_ok=True)
 
 
 if __name__ == "__main__":
