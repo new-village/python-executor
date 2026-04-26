@@ -18,11 +18,11 @@ Output columns (added on top of original):
   parsed_brand_name        - ブランド名 (法人種別除く)
   parsed_brand_kana        - ブランド名カナ
   parsed_name_normalized   - 正規化済み法人名
-  parsed_prefecture        - 都道府県 (from address parser)
-  parsed_city              - 市区町村
-  parsed_town              - 町名
-  parsed_block             - 番地 (正規化済み: 半角数字+ハイフン)
-  parsed_block_raw         - 番地 原文
+  parsed_state             - 都道府県 (from address parser; field: state)
+  parsed_city              - 市区町村 (field: city)
+  parsed_suburb            - 町名 (field: suburb)
+  parsed_house_number      - 番地 (正規化済み: 半角数字+ハイフン; field: house_number)
+  parsed_house_number_raw  - 番地 原文 (field: house_number_raw)
   parsed_addr_normalized   - 正規化済み住所
 """
 
@@ -125,11 +125,11 @@ def parse_dataframe(df: pd.DataFrame) -> pd.DataFrame:
         "parsed_name_normalized": [],
     }
     addr_cols = {
-        "parsed_prefecture": [],
+        "parsed_state": [],
         "parsed_city": [],
-        "parsed_town": [],
-        "parsed_block": [],
-        "parsed_block_raw": [],
+        "parsed_suburb": [],
+        "parsed_house_number": [],
+        "parsed_house_number_raw": [],
         "parsed_addr_normalized": [],
     }
 
@@ -141,17 +141,17 @@ def parse_dataframe(df: pd.DataFrame) -> pd.DataFrame:
         name_cols["parsed_brand_kana"].append(cr.get("brand_kana"))
         name_cols["parsed_name_normalized"].append(cr.get("normalized"))
 
-        # Address
+        # Address — join prefecture_name + city_name + street_number
         ar = safe_parse_address(
             getattr(row, "prefecture_name", None),
             getattr(row, "city_name", None),
             getattr(row, "street_number", None),
         )
-        addr_cols["parsed_prefecture"].append(ar.get("prefecture"))
+        addr_cols["parsed_state"].append(ar.get("state"))
         addr_cols["parsed_city"].append(ar.get("city"))
-        addr_cols["parsed_town"].append(ar.get("town"))
-        addr_cols["parsed_block"].append(ar.get("block"))
-        addr_cols["parsed_block_raw"].append(ar.get("block_raw"))
+        addr_cols["parsed_suburb"].append(ar.get("suburb"))
+        addr_cols["parsed_house_number"].append(ar.get("house_number"))
+        addr_cols["parsed_house_number_raw"].append(ar.get("house_number_raw"))
         addr_cols["parsed_addr_normalized"].append(ar.get("normalized"))
 
         if i % BATCH_SIZE == 0 or i == total:
