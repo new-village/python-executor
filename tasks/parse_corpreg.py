@@ -187,15 +187,29 @@ def main() -> None:
         logger.info(f"Total rows: {total_rows:,}")
 
         writer = None
+        schema = None
         processed = 0
 
         for batch in pf.iter_batches(batch_size=CHUNK_SIZE):
             df_chunk = batch.to_pandas()
             df_parsed = parse_chunk(df_chunk)
-            table = pa.Table.from_pandas(df_parsed, preserve_index=False)
 
-            if writer is None:
-                writer = pq.ParquetWriter(str(dst_tmp), table.schema)
+            if schema is None:
+                # Fix schema on first batch: cast all new parsed_* columns to string
+                # to avoid type inference differences across chunks (e.g. None vs str)
+                table = pa.Table.from_pandas(df_parsed, preserve_index=False)
+                # Rebuild schema with parsed_* columns forced to string
+                new_fields = []
+                for field in table.schema:
+                    if field.name.startswith("parsed_"):
+                        new_fields.append(pa.field(field.name, pa.string()))
+                    else:
+                        new_fields.append(field)
+                schema = pa.schema(new_fields)
+                writer = pq.ParquetWriter(str(dst_tmp), schema)
+
+            # Cast to fixed schema
+            table = pa.Table.from_pandas(df_parsed, schema=schema, preserve_index=False)
             writer.write_table(table)
 
             processed += len(df_chunk)
