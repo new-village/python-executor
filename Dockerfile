@@ -5,6 +5,9 @@ ENV APP_HOME=/app
 WORKDIR $APP_HOME
 COPY . ./
 
+# Install git (required for pip git+ dependencies)
+RUN apt-get update && apt-get install -y --no-install-recommends git && rm -rf /var/lib/apt/lists/*
+
 # Install dependencies if present
 COPY requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.txt
