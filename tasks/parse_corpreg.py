@@ -86,16 +86,16 @@ def download_to_tmpfile(sc: storage.Client, bucket_name: str, blob_name: str) ->
 
 
 def upload_from_tmpfile(sc: storage.Client, local_path: Path, bucket_name: str, blob_name: str) -> None:
-    import subprocess
     size_mb = local_path.stat().st_size / 1024 / 1024
     logger.info(f"Uploading {local_path} ({size_mb:.1f} MB) → gs://{bucket_name}/{blob_name} ...")
-    # Use gsutil cp for memory-efficient streaming upload
-    result = subprocess.run(
-        ["gsutil", "-o", "GSUtil:parallel_composite_upload_threshold=150M", "cp", str(local_path), f"gs://{bucket_name}/{blob_name}"],
-        capture_output=True, text=True
+    bucket = sc.bucket(bucket_name)
+    blob = bucket.blob(blob_name)
+    # upload_from_filename uses resumable upload internally and does not
+    # load the entire file into memory at once.
+    blob.upload_from_filename(
+        str(local_path),
+        content_type="application/octet-stream",
     )
-    if result.returncode != 0:
-        raise RuntimeError(f"gsutil upload failed: {result.stderr}")
     logger.info("  Upload complete.")
 
 
@@ -233,6 +233,10 @@ def main() -> None:
             writer.close()
 
         logger.info(f"Parsing complete. {processed:,} rows written.")
+
+        # Free up memory before upload (source parquet no longer needed)
+        src_tmp.unlink(missing_ok=True)
+        import gc; gc.collect()
 
         # Upload result
         upload_from_tmpfile(sc, dst_tmp, DST_BUCKET, dst_blob)
