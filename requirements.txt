@@ -6,3 +6,4 @@ google-cloud-bigquery[pandas]
 google-cloud-storage
 openai
 requests
+ja-entity-parser

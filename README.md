@@ -84,6 +84,7 @@ gcloud builds submit --config cloudbuild.yaml --service-account="projects/$PROJE
 | `tasks.hello` | 動作確認用のサンプルタスク。ログに挨拶を出力します。 | - |
 | `tasks.fetch_corpreg_nta_all` | 国税庁から法人番号データを全件取得し、Parquet形式で保存します。 | 出力先: `/data/corpreg_nta_YYYYMM.parquet`<br>実際の運用ではメモリ増量(8GB〜)を推奨。 |
 | `tasks.fetch_corpreg_nta_diff` | 特定の日付（デフォルトは当日）の差分データを取得し、Parquet形式で保存します。 | 引数: `YYYYMMDD` (任意)<br>出力先: `/data/corpreg_nta_YYYYMMDD.parquet` |
+| `tasks.parse_corpreg` | NTA法人登記Parquetの法人名・住所を `ja-entity-parser` でパースし、構造化済みParquetをGCSに出力します。 | 引数: `YYYYMM` (任意、デフォルト: 当月)<br>入力: `gs://yata-raw/corpreg_nta_YYYYMM.parquet`<br>出力: `gs://yata-master/corpreg_parsed_YYYYMM.parquet` |
 
 ## ジョブの動的実行 (gcloud コマンド)
 コンテナの引数（`--args`）にモジュール名を渡すことで、任意のPythonモジュールを実行できます。
