@@ -6,4 +6,4 @@ google-cloud-bigquery[pandas]
 google-cloud-storage
 openai
 requests
-ja-entity-parser==1.0.2
+ja-entity-parser>=1.0.3
