@@ -87,19 +87,97 @@ gcloud builds submit --config cloudbuild.yaml --service-account="projects/$PROJE
 | `tasks.parse_corpreg` | NTA法人登記Parquetの法人名・住所を `ja-entity-parser` でパースし、構造化済みParquetをGCSに出力します。 | 引数: `YYYYMM` (任意、デフォルト: 当月)<br>入力: `gs://yata-raw/corpreg_nta_YYYYMM.parquet`<br>出力: `gs://yata-master/corpreg_parsed_YYYYMM.parquet` |
 
 ## ジョブの動的実行 (gcloud コマンド)
+
 コンテナの引数（`--args`）にモジュール名を渡すことで、任意のPythonモジュールを実行できます。
 
 ```bash
-# デフォルト (tasks.hello) を実行
-gcloud run jobs execute $JOB_NAME --region $REGION
+export PROJECT_ID="yata-intelligence"
+export REGION="asia-northeast1"
+export JOB_NAME="python-executor-job"
 
-# NTA 法人番号全件取得タスクを実行
+# 動作確認 (tasks.hello)
 gcloud run jobs execute $JOB_NAME \
   --region $REGION \
-  --args="tasks.fetch_corpreg_nta_all"
+  --project $PROJECT_ID
 
-# NTA 法人番号差分取得タスクを実行 (引数で日付を指定)
+# NTA 法人番号差分取得（引数で日付を指定）
 gcloud run jobs execute $JOB_NAME \
   --region $REGION \
-  --args="tasks.fetch_corpreg_nta_diff","20240304"
+  --project $PROJECT_ID \
+  --args="tasks.fetch_corpreg_nta_diff","20260427"
+
+# 法人登記パース（全件スナップショット: gs://yata-raw/corpreg_nta_YYYYMM.parquet → gs://yata-master/corpreg_parsed_YYYYMM.parquet）
+gcloud run jobs execute $JOB_NAME \
+  --region $REGION \
+  --project $PROJECT_ID \
+  --args="tasks.parse_corpreg","202603"
+```
+
+> **注意:** Cloud Run Job のデフォルト args は `tasks.fetch_corpreg_nta_diff` に設定されています。`--args` を省略するとデフォルトが実行されます。実行中のステータスは以下で確認できます。
+
+```bash
+# 直近の実行一覧
+gcloud run jobs executions list \
+  --job $JOB_NAME \
+  --region $REGION \
+  --project $PROJECT_ID \
+  --limit 5
+
+# 特定実行の詳細
+gcloud run jobs executions describe <EXECUTION_NAME> \
+  --region $REGION \
+  --project $PROJECT_ID
+
+# ログ確認
+gcloud logging read \
+  "resource.type=cloud_run_job AND resource.labels.job_name=$JOB_NAME" \
+  --project $PROJECT_ID \
+  --limit 50 \
+  --format="value(textPayload)"
+```
+
+## イメージのビルド・デプロイ手順
+
+`requirements.txt` や `tasks/` を変更した後は、新しいイメージをビルドして Job を更新する必要があります。
+
+### ビルド方法（`cloudbuild-git.yaml` を使用）
+
+`cloudbuild.yaml`（ローカルソースをアップロードする方式）は権限エラーになるため、
+GitHub から clone する `cloudbuild-git.yaml` を使います。
+
+```bash
+# main ブランチの HEAD を確認
+cd /path/to/python-executor
+COMMIT_SHA=$(git rev-parse HEAD)
+
+# ビルド実行（--no-source でローカルソース送信をスキップ）
+gcloud builds submit \
+  --project $PROJECT_ID \
+  --config cloudbuild-git.yaml \
+  --no-source \
+  --substitutions="COMMIT_SHA=${COMMIT_SHA},_JOB_NAME=${JOB_NAME}" \
+  --async
+
+# ビルドステータス確認
+gcloud builds list --project $PROJECT_ID --limit 3
+```
+
+> **注意:** `COMMIT_SHA` は `git rev-parse HEAD`（フル40文字）を使うこと。短縮SHA（7文字）だと push ステップが失敗します。
+
+### ビルド済みイメージで Job だけ更新する場合
+
+Artifact Registry に既にイメージがある場合（再ビルド不要な場合）は、直接 Job を更新できます。
+
+```bash
+# 利用可能なタグ一覧
+gcloud artifacts docker tags list \
+  asia-northeast1-docker.pkg.dev/$PROJECT_ID/cloud-run-source-deploy/python-executor \
+  --project $PROJECT_ID
+
+# Job のイメージを更新
+IMAGE="asia-northeast1-docker.pkg.dev/$PROJECT_ID/cloud-run-source-deploy/python-executor:<COMMIT_SHA>"
+gcloud run jobs update $JOB_NAME \
+  --image $IMAGE \
+  --region $REGION \
+  --project $PROJECT_ID
 ```
