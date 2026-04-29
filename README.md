@@ -9,11 +9,23 @@ Google Cloud Run Jobs 上で動作する、Pythonジョブの実行用フレー�
 *   **Cloud Build (CI/CD)**: 最新のソースコードを含む「汎用的なコンテナイメージ」を構築し、Jobを最新化します。
 *   **Cloud Run Jobs (実行)**: 実行時に引数 (`--args`) を指定することで、同一イメージから異なるタスクを動的に実行します。
 
-## パイプライン設計 (To-Be v5)
+## パイプライン設計 (To-Be v6)
 
 NTA（国税庁）法人番号データの取得・パース・マスター管理を行う2つのパイプラインで構成されます。
 
-設計図: [`images/pipeline_tobe_v5.png`](images/pipeline_tobe_v5.png)
+設計図: [`images/pipeline_tobe_v6.png`](images/pipeline_tobe_v6.png)
+
+### BigQuery 参照方式
+
+データの重複を避けるため、BigQuery には GCS 上の Parquet ファイルを直接参照する **外部テーブル（External Table）** を使用します。
+BQ へのデータロードは行いません。パイプラインは GCS への書き込みのみを担当します。
+
+| BQ テーブル | 参照先 GCS ファイル | 説明 |
+|:------------|:--------------------|:-----|
+| `corpreg.latest` (EXTERNAL) | `gs://yata-master/corpreg_nta_latest.parquet` | マスター最新版（SQL参照用） |
+| `corpreg.diff` (EXTERNAL) | `gs://yata-master/corpreg_nta_diff.parquet` | 最新の差分データ（SQL参照用） |
+
+外部テーブルはファイルが更新されると自動的に最新データが反映されます（再作成不要）。
 
 ### 差分フロー（日次バッチ: `tasks.daily_pipeline`）
 
@@ -45,7 +57,7 @@ NTA（国税庁）法人番号データの取得・パース・マスター管�
 | `yata-master` | `corpreg_nta_diff.parquet` | パース済み差分（毎回上書き） |
 | `yata-master` | `corpreg_nta_active.parquet` | パース済み全件アクティブ（月次上書き） |
 | `yata-master` | `corpreg_nta_closed.parquet` | 閉鎖企業の累積（日次append） |
-| `yata-master` | `corpreg_nta_latest.parquet` | マスター最新版（active + closed） |
+| `yata-master` | `corpreg_nta_latest.parquet` | マスター最新版（active + closed）← BQ外部テーブル参照元 |
 
 ## タスク一覧
 
@@ -169,6 +181,23 @@ gcloud artifacts repositories create $REPOSITORY \
 gcloud builds submit --config cloudbuild.yaml --service-account="projects/$PROJECT_ID/serviceAccounts/$DEPLOY_SA_NAME@$PROJECT_ID.iam.gserviceaccount.com" .
 ```
 
+## BigQuery 外部テーブルの手動再作成（必要時）
+
+外部テーブルは GCS ファイルを参照するだけなので、通常は再作成不要です。
+万が一削除された場合は以下で再作成してください。
+
+```bash
+# latest（マスター最新版）
+bq mk --table \
+  --external_table_definition=@PARQUET=gs://yata-master/corpreg_nta_latest.parquet \
+  yata-intelligence:corpreg.latest
+
+# diff（最新差分）
+bq mk --table \
+  --external_table_definition=@PARQUET=gs://yata-master/corpreg_nta_diff.parquet \
+  yata-intelligence:corpreg.diff
+```
+
 ## ディレクトリ構成
 ```text
 .
@@ -177,7 +206,7 @@ gcloud builds submit --config cloudbuild.yaml --service-account="projects/$PROJE
 ├── cloudbuild-git.yaml     # CI/CD定義 (GitHub clone方式)
 ├── requirements.txt        # Python依存パッケージ
 ├── images/                 # 設計図・ダイアグラム
-│   └── pipeline_tobe_v5.png
+│   └── pipeline_tobe_v6.png
 ├── tasks/                  # 実行タスク群
 │   ├── __init__.py
 │   ├── pipeline_utils.py   # パイプライン共通ユーティリティ
