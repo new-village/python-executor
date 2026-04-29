@@ -2,11 +2,11 @@
 pipeline_utils.py
 
 Shared utilities for the corpreg NTA monthly/daily pipelines:
-- GCS helpers (download, upload)
+- GCS helpers (download, upload, exists)
 - Parse helpers (safe wrappers around ja-entity-parser)
 - Chunk parse function
-- Merge logic
-- Closed-company extraction
+- Closed-company extraction and append
+- Merge logic (upsert diff into latest)
 
 All GCS operations go through local temp files to keep memory bounded.
 """
@@ -250,43 +250,171 @@ def parse_parquet_file(
 def is_closed(df: pd.DataFrame) -> pd.Series:
     """
     Return a boolean mask for rows that represent closed companies.
-    Definition: close_date is non-null OR process == '21'.
+
+    Definition (from NTA spec):
+    - process == '21' (閉鎖等登記) OR process == '22' (削除)
+    - OR close_date is non-null and non-empty
+
+    Note: The caller is responsible for filtering latest=='1' before
+    calling this function if needed.
     """
     has_close_date = df["close_date"].notna() & (df["close_date"] != "")
-    # process may be int or str depending on parquet schema
-    is_process_21 = df["process"].astype(str) == "21"
-    return has_close_date | is_process_21
+    process_str = df["process"].astype(str)
+    is_process_closed = (process_str == "21") | (process_str == "22")
+    return has_close_date | is_process_closed
 
 
-def extract_closed_from_latest(
-    sc: storage.Client, latest_blob: str = "corpreg_nta_latest.parquet"
-) -> pd.DataFrame | None:
+def extract_and_append_closed(
+    sc: storage.Client,
+    src_blob: str = "corpreg_nta_diff.parquet",
+    closed_blob: str = "corpreg_nta_closed.parquet",
+) -> int:
     """
-    Download the previous latest parquet from GCS and return only
-    closed-company rows. Returns None if the blob does not exist
-    (first run).
-    """
-    if not blob_exists(sc, GCS_MASTER_BUCKET, latest_blob):
-        logger.info(
-            f"gs://{GCS_MASTER_BUCKET}/{latest_blob} does not exist "
-            "(first run). Skipping closed-company extraction."
-        )
-        return None
+    Extract closed-company rows from the diff parquet and append them
+    to the cumulative closed parquet in GCS.
 
-    tmp = download_to_tmpfile(sc, GCS_MASTER_BUCKET, latest_blob)
+    Filters: latest=='1' AND is_closed().
+    If closed_blob already exists, reads it and concatenates.
+    Deduplicates by corporate_number (keeps the latest entry from diff).
+
+    Returns the number of newly appended closed rows.
+    """
+    # Download diff
+    diff_tmp = download_to_tmpfile(sc, GCS_MASTER_BUCKET, src_blob)
     try:
-        df = pd.read_parquet(str(tmp))
-        closed = df[is_closed(df)].copy()
-        logger.info(
-            f"Extracted {len(closed):,} closed-company rows from previous latest."
-        )
-        return closed
+        df_diff = pd.read_parquet(str(diff_tmp))
     finally:
-        tmp.unlink(missing_ok=True)
+        diff_tmp.unlink(missing_ok=True)
+
+    # Filter: latest=='1' only
+    if "latest" in df_diff.columns:
+        df_diff = df_diff[df_diff["latest"].astype(str) == "1"].copy()
+
+    # Apply closed filter
+    mask = is_closed(df_diff)
+    df_new_closed = df_diff[mask].copy()
+    new_count = len(df_new_closed)
+    logger.info(f"Extracted {new_count:,} closed rows from diff.")
+
+    if new_count == 0:
+        logger.info("No closed rows to append. Skipping.")
+        return 0
+
+    # Load existing closed parquet if it exists
+    if blob_exists(sc, GCS_MASTER_BUCKET, closed_blob):
+        existing_tmp = download_to_tmpfile(sc, GCS_MASTER_BUCKET, closed_blob)
+        try:
+            df_existing = pd.read_parquet(str(existing_tmp))
+        finally:
+            existing_tmp.unlink(missing_ok=True)
+        logger.info(f"Existing closed rows: {len(df_existing):,}")
+
+        # Remove rows that will be replaced by newer diff entries
+        new_corp_nums = set(df_new_closed["corporate_number"])
+        df_existing = df_existing[
+            ~df_existing["corporate_number"].isin(new_corp_nums)
+        ]
+
+        # Align columns
+        all_cols = list(df_new_closed.columns)
+        for col in all_cols:
+            if col not in df_existing.columns:
+                df_existing[col] = None
+        df_existing = df_existing[all_cols]
+
+        df_closed = pd.concat([df_existing, df_new_closed], ignore_index=True)
+    else:
+        logger.info("No existing closed parquet (first run). Creating new.")
+        df_closed = df_new_closed
+
+    logger.info(f"Total closed rows after append: {len(df_closed):,}")
+
+    # Write back
+    out_tmp = Path(tempfile.mktemp(suffix=".parquet"))
+    try:
+        df_closed.to_parquet(str(out_tmp), engine="pyarrow", index=False)
+        upload_from_tmpfile(sc, out_tmp, GCS_MASTER_BUCKET, closed_blob)
+    finally:
+        out_tmp.unlink(missing_ok=True)
+
+    return new_count
+
+
+def append_closed_to_latest(
+    sc: storage.Client,
+    closed_blob: str = "corpreg_nta_closed.parquet",
+    active_blob: str = "corpreg_nta_active.parquet",
+    latest_blob: str = "corpreg_nta_latest.parquet",
+) -> int:
+    """
+    Combine active + closed parquets to produce the latest parquet.
+
+    - Reads active_blob (required — must exist)
+    - If closed_blob exists, appends closed rows not already in active
+    - Writes the result to latest_blob (overwrite)
+
+    Returns the total row count of the latest parquet.
+    """
+    # Load active (required)
+    active_tmp = download_to_tmpfile(sc, GCS_MASTER_BUCKET, active_blob)
+    try:
+        df_active = pd.read_parquet(str(active_tmp))
+    finally:
+        active_tmp.unlink(missing_ok=True)
+    logger.info(f"Active rows: {len(df_active):,}")
+
+    # Load closed (optional)
+    if blob_exists(sc, GCS_MASTER_BUCKET, closed_blob):
+        closed_tmp = download_to_tmpfile(sc, GCS_MASTER_BUCKET, closed_blob)
+        try:
+            df_closed = pd.read_parquet(str(closed_tmp))
+        finally:
+            closed_tmp.unlink(missing_ok=True)
+        logger.info(f"Closed rows: {len(df_closed):,}")
+
+        # Only append closed rows whose corporate_number is NOT in active
+        active_corp_nums = set(df_active["corporate_number"])
+        df_closed_new = df_closed[
+            ~df_closed["corporate_number"].isin(active_corp_nums)
+        ].copy()
+        logger.info(
+            f"Closed rows to append (after dedup vs active): {len(df_closed_new):,}"
+        )
+
+        if len(df_closed_new) > 0:
+            # Align columns
+            all_cols = list(df_active.columns)
+            for col in all_cols:
+                if col not in df_closed_new.columns:
+                    df_closed_new[col] = None
+            df_closed_new = df_closed_new[all_cols]
+            df_latest = pd.concat([df_active, df_closed_new], ignore_index=True)
+        else:
+            df_latest = df_active
+    else:
+        logger.info(
+            "No closed parquet found. Using active as latest directly."
+        )
+        df_latest = df_active
+
+    total = len(df_latest)
+    logger.info(f"Latest row count: {total:,}")
+
+    # Write latest
+    out_tmp = Path(tempfile.mktemp(suffix=".parquet"))
+    try:
+        df_latest.to_parquet(str(out_tmp), engine="pyarrow", index=False)
+        del df_latest
+        gc.collect()
+        upload_from_tmpfile(sc, out_tmp, GCS_MASTER_BUCKET, latest_blob)
+    finally:
+        out_tmp.unlink(missing_ok=True)
+
+    return total
 
 
 # ---------------------------------------------------------------------------
-# Merge logic (daily pipeline Step C)
+# Merge logic (daily pipeline: upsert diff into latest)
 # ---------------------------------------------------------------------------
 
 def merge_diff_into_latest(
@@ -299,7 +427,7 @@ def merge_diff_into_latest(
 
     Logic:
     - Load diff, keep only rows where latest == 1
-    - Load current latest
+    - Load current latest (if it doesn't exist, use diff as initial latest)
     - For each corporate_number in diff, replace the row in latest
     - Write back to GCS
 
@@ -322,7 +450,21 @@ def merge_diff_into_latest(
         logger.info("No records to upsert. Skipping merge.")
         return 0
 
-    # --- Download current latest ---
+    # --- Download current latest (or handle first run) ---
+    if not blob_exists(sc, GCS_MASTER_BUCKET, latest_blob):
+        logger.info(
+            f"gs://{GCS_MASTER_BUCKET}/{latest_blob} does not exist "
+            "(first run). Using diff as initial latest."
+        )
+        merged_tmp = Path(tempfile.mktemp(suffix=".parquet"))
+        try:
+            df_diff.to_parquet(str(merged_tmp), engine="pyarrow", index=False)
+            upload_from_tmpfile(sc, merged_tmp, GCS_MASTER_BUCKET, latest_blob)
+        finally:
+            merged_tmp.unlink(missing_ok=True)
+        logger.info(f"Initial latest created with {upsert_count:,} rows.")
+        return upsert_count
+
     latest_tmp = download_to_tmpfile(sc, GCS_MASTER_BUCKET, latest_blob)
     try:
         df_latest = pd.read_parquet(str(latest_tmp))
