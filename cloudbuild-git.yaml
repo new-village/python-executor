@@ -7,17 +7,7 @@ steps:
       - 'https://github.com/new-village/python-executor.git'
       - '.'
 
-  # 2. Configure docker auth for Artifact Registry
-  - id: 'auth-docker'
-    name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
-    entrypoint: 'gcloud'
-    args:
-      - 'auth'
-      - 'configure-docker'
-      - '${_REGION}-docker.pkg.dev'
-      - '--quiet'
-
-  # 3. Build the container image
+  # 2. Build the container image
   - id: 'build-image'
     name: 'gcr.io/cloud-builders/docker'
     args:
@@ -28,28 +18,22 @@ steps:
       - '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/${_IMAGE_NAME}:latest'
       - '.'
 
-  # 3. Push image (commit SHA tag)
-  - id: 'push-sha'
+  # 3. Push all tags
+  - id: 'push-images'
     name: 'gcr.io/cloud-builders/docker'
     args:
       - 'push'
-      - '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/${_IMAGE_NAME}:$COMMIT_SHA'
+      - '-a'
+      - '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/${_IMAGE_NAME}'
 
-  # 3b. Push image (latest tag)
-  - id: 'push-latest'
-    name: 'gcr.io/cloud-builders/docker'
-    args:
-      - 'push'
-      - '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/${_IMAGE_NAME}:latest'
-
-  # 4. Update Cloud Run Job image
-  - id: 'update-job'
+  # 4. Deploy/update Cloud Run Job
+  - id: 'deploy-job'
     name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
     entrypoint: 'gcloud'
     args:
       - 'run'
       - 'jobs'
-      - 'update'
+      - 'deploy'
       - '${_JOB_NAME}'
       - '--image'
       - '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/${_IMAGE_NAME}:$COMMIT_SHA'
@@ -64,7 +48,7 @@ substitutions:
   _REGION: 'asia-northeast1'
   _REPOSITORY: 'cloud-run-source-deploy'
   _IMAGE_NAME: 'python-executor'
-  _JOB_NAME: 'build-name-mapping-job'
+  _JOB_NAME: 'python-executor-job'
 
 options:
   logging: CLOUD_LOGGING_ONLY
