@@ -23,7 +23,6 @@ BQ へのデータロードは行いません。パイプラインは GCS への
 | BQ テーブル | 参照先 GCS ファイル | 説明 |
 |:------------|:--------------------|:-----|
 | `corpreg.latest` (EXTERNAL) | `gs://yata-master/corpreg_nta_latest.parquet` | マスター最新版（SQL参照用） |
-| `corpreg.diff` (EXTERNAL) | `gs://yata-master/corpreg_nta_diff.parquet` | 最新の差分データ（SQL参照用） |
 
 外部テーブルはファイルが更新されると自動的に最新データが反映されます（再作成不要）。
 
@@ -192,10 +191,6 @@ bq mk --table \
   --external_table_definition=@PARQUET=gs://yata-master/corpreg_nta_latest.parquet \
   yata-intelligence:corpreg.latest
 
-# diff（最新差分）
-bq mk --table \
-  --external_table_definition=@PARQUET=gs://yata-master/corpreg_nta_diff.parquet \
-  yata-intelligence:corpreg.diff
 ```
 
 ## ディレクトリ構成
